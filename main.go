@@ -21,6 +21,10 @@ func main() {
 	if dbURL == "" {
 		log.Fatal("DB_URL is not set")
 	}
+	secret := os.Getenv("SECRET")
+	if secret == "" {
+		log.Fatal("Secret jwl is not set")
+	}
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -37,13 +41,24 @@ func main() {
 	cfg := &apiConfig{
 		dbQueries: dbQueries,
 		platform:  os.Getenv("PLATFORM"),
+		polkaKey:  os.Getenv("POLKA_KEY"),
 	}
 	// 1) Readiness endpoint: /healthz (any method)
 	mux.HandleFunc("GET /api/healthz", handlerReadiness)
-	mux.HandleFunc("POST /api/validate_chirp", requireMethod(http.MethodPost, handlerValidateChirp))
+	mux.HandleFunc("PUT /api/users", requireMethod(http.MethodPut, cfg.handlerUpdateLogin))
+	mux.HandleFunc("POST /api/login", requireMethod(http.MethodPost, cfg.handlerLogin))
+	mux.HandleFunc("POST /api/refresh", requireMethod(http.MethodPost, cfg.handlerRefresh))
+	mux.HandleFunc("POST /api/revoke", requireMethod(http.MethodPost, cfg.handlerRevoke))
+	//mux.HandleFunc("POST /api/validate_chirp", requireMethod(http.MethodPost, handlerValidateChirp))
+	mux.HandleFunc("POST /api/chirps", requireMethod(http.MethodPost, cfg.handlerCreateChirp))
+	mux.HandleFunc("GET /api/chirps", requireMethod(http.MethodGet, cfg.handlerFetchAllChirps))
+	mux.HandleFunc("GET /api/chirps/{chirpID}", requireMethod(http.MethodGet, cfg.handlerGetChirpByID))
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", requireMethod(http.MethodDelete, cfg.handlerDeleteChirpByID))
 	mux.HandleFunc("GET /admin/metrics", cfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
 	mux.HandleFunc("POST /api/users", requireMethod(http.MethodPost, cfg.handlerUsers))
+
+	mux.HandleFunc("POST /api/polka/webhooks", requireMethod(http.MethodPost, cfg.handlerWebhooks))
 
 	// 2) File server moved to /app/
 	fileServer := http.FileServer(http.Dir("."))
@@ -62,6 +77,8 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+	jwtSecret      string
+	polkaKey       string
 }
 
 func decodeJSON(r *http.Request, dst any) error {
@@ -71,6 +88,6 @@ func decodeJSON(r *http.Request, dst any) error {
 
 func toAPIUser(u database.User) apiUser {
 	return apiUser{
-		ID: u.ID, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt, Email: u.Email,
+		ID: u.ID, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt, Email: u.Email, IsChirpyRed: u.IsChirpyRed,
 	}
 }
